@@ -1,119 +1,101 @@
 package XML::SAXDriver::Excel;
 
 use strict;
-use vars qw($VERSION);
-
-$VERSION = '0.03';
 
 use Spreadsheet::ParseExcel;
 
-sub new {
-  my ($class, %params) = @_;
+use base qw(XML::SAX::Base);
+use vars qw($VERSION $NS_SAXDriver_Excel);
+$VERSION = '0.05';
+$NS_SAXDriver_Excel = 'http://xmlns.perl.org/sax/XML::SAXDriver::Excel';
+
+sub _parse_bytestream
+{
+  my $self = shift;
+  my $stream = shift; 
   
-  %params = (%params, 
-            #### Now declare some private vars, we need them blessed with the object, for threaded/multi-process use.
-            _row => [], 
-            _row_num => -1,
-            _last_row_num => 0,
-            _last_col => 0
-            );  
-           
-  return bless \%params, $class;
+  die ("Cannot use String to parse a binary Excel file.  You can only use a file by setting SystemId");
+  
+  $self->_parse_Excel(\$stream);  
+}
+sub _parse_string
+{
+  my $self = shift;
+  my $stream = shift; 
+  
+  ### This is experimental due to the binary streams
+  #require IO::String;
+  #$io = IO::String->new($var);
+  #$self->_parse_Excel($io);
+  
+  die ("Cannot use String to parse a binary Excel file.  You can only use a file by setting SystemId"); 
+  
+  #my @strings = split("\n", $self->{ParseOptions}->{Source}{String});
+  #$self->_parse_Excel(\@strings);  
+}
+sub _parse_systemid
+{
+  my $self = shift;
+  my $path = shift;
+  
+  $self->_init();
+  $self->{ParseOptions}->{Parser}->Parse($path);
+  $self->_end();
+  
 }
 
-sub parse {
+sub _init {
   my $self = shift;
   
   ### Reset vars before parsing
-  $self->{'_row'} = [];  ## Used to push row values per row
-	$self->{'_row_num'} = -1;  ## Set at -1 since rows are counted from 0
-	$self->{'_last_row_num'} = 0;  ## Used to save the last row value received
-	$self->{'_last_col'} = 0;
+  $self->{_row} = [];  ## Used to push row values per row
+	$self->{_row_num} = -1;  ## Set at -1 since rows are counted from 0
+	$self->{_last_row_num} = 0;  ## Used to save the last row value received
+	$self->{_last_col} = 0;
 		    
-  my $args;
-  if (@_ == 1 && !ref($_[0])) 
-  {
-      $args = { Source => { String => shift }};
-  }
-  else 
-  {
-      $args = (@_ == 1) ? shift : { @_ };
-  }
-  
-  my $parse_options = { %$self, %$args };
-  $self->{ParseOptions} = $parse_options;
-  
-  if (!defined($parse_options->{Source})
-          || !(
-          defined($parse_options->{Source}{String})
-          || defined($parse_options->{Source}{ByteStream})
-          || defined($parse_options->{Source}{SystemId})
-          )) 
-  {
-    die "XML::SAXDriver::CSV: no source defined for parse\n";
-  }
-  
-  if (defined($parse_options->{Handler})) {
-      $parse_options->{DocumentHandler} ||= $parse_options->{Handler};
-      $parse_options->{DTDHandler} ||= $parse_options->{DTDHandler};
-  }
-  
-  $parse_options->{NewLine} = "\n" unless defined($parse_options->{NewLine});
-  $parse_options->{IndentChar} = "\t" unless defined($parse_options->{IndentChar});
+  $self->{ParseOptions}->{NewLine} = "\n" unless defined($self->{ParseOptions}->{NewLine});
+  $self->{ParseOptions}->{IndentChar} = "\t" unless defined($self->{ParseOptions}->{IndentChar});
       
-  $parse_options->{Parser} ||= Spreadsheet::ParseExcel->new(CellHandler => \&cb_routine, Object => $self, NotSetCell => 1);
+  $self->{ParseOptions}->{Parser} ||= Spreadsheet::ParseExcel->new(CellHandler => \&cb_routine, Object => $self, NotSetCell => 1);
   
-  $parse_options->{Headings_Handler} ||= \&normalize_heading;
+  $self->{ParseOptions}->{Headings_Handler} ||= \&_normalize_heading;
   
-  my ($ioref, @strings);
-  if (defined($parse_options->{Source}{SystemId}) 
-      || defined($parse_options->{Source}{ByteStream}) ) {
-      $ioref = $parse_options->{Source}{ByteStream};
-    if (!$ioref) 
-    {
-      require IO::File;
-      $ioref = IO::File->new($parse_options->{Source}{SystemId})
-        || die "Cannot open SystemId '$parse_options->{Source}{SystemId}' : $!";
-    }
-    else
-    {
-      die ("Cannot use ByteStream to parse a binary Excel file.  You can only use a file by setting SystemId");
-    }
-              
-  }
-  elsif (defined $parse_options->{Source}{String}) 
-  {
-    die ("Cannot use String to parse a binary Excel file.  You can only use a file by setting SystemId");    
-  }
+  $self->{_document} = {};
+  $self->{ParseOptions}->{Handler}->start_document($self->{_document});
+  $self->xml_decl($self->{ParseOptions}->{Declaration});
+  my $pm_excel = $self->_create_node(
+                                  Prefix       => 'SAXDriver::Excel',
+                                  NamespaceURI => $NS_SAXDriver_Excel,
+                                  );
+  $self->start_prefix_mapping($pm_excel);
+  $self->end_prefix_mapping($pm_excel);
+  $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
   
-  my $document = {};
-  $parse_options->{Handler}->start_document($document);
-  $parse_options->{Handler}->characters({Data => $parse_options->{NewLine}});
-  
-  my $doc_element = {
-              Name => $parse_options->{File_Tag} || "records",
+  $self->{_doc_element} = {
+              Name => $self->{ParseOptions}->{File_Tag} || "records",
               Attributes => {},
           };
 
-  $parse_options->{Handler}->start_element($doc_element);
-  $parse_options->{Handler}->characters({Data => $parse_options->{NewLine}});
+  $self->{ParseOptions}->{Handler}->start_element($self->{_doc_element});
+  $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
+}
   
   ## Parse file or string
-  $parse_options->{Parser}->Parse($parse_options->{Source}{SystemId} || $parse_options->{Source}{String});
   
   
-  
-  
+sub _end
+{  
+  my $self = shift;
   _print_xml_finish($self);
   
   ### Reset vars after parsing
-  $self->{'_row'} = [];  ## Used to push row values per row
-	$self->{'_row_num'} = -1;  ## Set at -1 since rows are counted from 0
-	$self->{'_last_row_num'} = 0;  ## Used to save the last row value received
+  $self->{_row} = [];  ## Used to push row values per row
+	$self->{_row_num} = -1;  ## Set at -1 since rows are counted from 0
+	$self->{_last_row_num} = 0;  ## Used to save the last row value received
   
-  $parse_options->{Handler}->end_element($doc_element);
+  $self->{ParseOptions}->{Handler}->end_element($self->{_doc_element});
   
-  return $parse_options->{Handler}->end_document($document);
+  return $self->{ParseOptions}->{Handler}->end_document($self->{_document});
   
 }
 
@@ -128,41 +110,41 @@ sub cb_routine($$$$$$)
 if ($iCol < $oWkS->{MaxCol})
   {
     
-    if ($self->{'_last_col'} > $iCol)
+    if ($self->{_last_col} > $iCol)
   	{
-  	  while ($self->{'_last_col'} < $oWkS->{MaxCol})
+  	  while ($self->{_last_col} < $oWkS->{MaxCol})
   	  {
-  	    push(@{$self->{'_row'}}, undef);
-  	    $self->{'_last_col'}++;    	    
+  	    push(@{$self->{_row}}, undef);
+  	    $self->{_last_col}++;    	    
   	  }  	
   	  _print_xml(@_);  	
   	}
     
-    if ($self->{'_last_col'} < $iCol)
+    if ($self->{_last_col} < $iCol)
   	{
-  	  while ($self->{'_last_col'} < $iCol)
+  	  while ($self->{_last_col} < $iCol)
   	  {
-  	    push(@{$self->{'_row'}}, undef);
-  	    $self->{'_last_col'}++;    	    
+  	    push(@{$self->{_row}}, undef);
+  	    $self->{_last_col}++;    	    
   	  }    	  
   	}
   	
-  	  push(@{$self->{'_row'}}, $oCell->Value());
-  	  $self->{'_last_row_num'} = $iRow;
-  	  $self->{'_last_col'}++;
+  	  push(@{$self->{_row}}, $oCell->Value());
+  	  $self->{_last_row_num} = $iRow;
+  	  $self->{_last_col}++;
   	  return;
   	
   	    	
   }
 
-  push(@{$self->{'_row'}}, $oCell->Value());# if $flag == 0;
+  push(@{$self->{_row}}, $oCell->Value());# if $flag == 0;
     
   _print_xml(@_);
   return;
         
 }
 
-sub normalize_heading  ### Default if no Headings_Handler is provided
+sub _normalize_heading  ### Default if no Headings_Handler is provided
 { 
   my $heading= shift;
   my $sub_char = shift || '_';
@@ -180,23 +162,23 @@ sub _print_xml
   
   my $oWkS = $oBook->{Worksheet}[$iSheet];
   
-  $self->{'_last_row_num'} = $iRow;
+  $self->{_last_row_num} = $iRow;
       
   
-  $self->{'_last_col'} = 0;      
+  $self->{_last_col} = 0;      
   my $temp_row = $oCell->Value();
-  $self->{'_row_num'} = $self->{'_last_row_num'};       
+  $self->{_row_num} = $self->{_last_row_num};       
       
               
       if (!@{$self->{ParseOptions}->{Col_Headings}} && !$self->{ParseOptions}->{Dynamic_Col_Headings}) 
       {
               my $i = 1;
-              @{$self->{ParseOptions}->{Col_Headings}} = map { "column" . $i++ } @{$self->{'_row'}};                
+              @{$self->{ParseOptions}->{Col_Headings}} = map { "column" . $i++ } @{$self->{_row}};                
       }
       elsif (!@{$self->{ParseOptions}->{Col_Headings}} && $self->{ParseOptions}->{Dynamic_Col_Headings})
       {
-              @{$self->{ParseOptions}->{Col_Headings}} = map { $self->{ParseOptions}->{Headings_Handler}->($_, $self->{ParseOptions}->{SubChar}); } @{$self->{'_row'}};
-              $self->{'_row'} = [];  ### Clear the @$row array
+              @{$self->{ParseOptions}->{Col_Headings}} = map { $self->{ParseOptions}->{Headings_Handler}->($_, $self->{ParseOptions}->{SubChar}); } @{$self->{_row}};
+              $self->{_row} = [];  ### Clear the @$row array
               return;  ### So that it does not print the column headings as the content of the first node.                
       }
       
@@ -219,7 +201,7 @@ sub _print_xml
                   {Data => $self->{ParseOptions}->{IndentChar} x 2} 
           );
           $self->{ParseOptions}->{Handler}->start_element($column);
-          $self->{ParseOptions}->{Handler}->characters({Data => $self->{'_row'}->[$i]});
+          $self->{ParseOptions}->{Handler}->characters({Data => $self->{_row}->[$i]});
           $self->{ParseOptions}->{Handler}->end_element($column);
           $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
       }
@@ -230,7 +212,7 @@ sub _print_xml
       $self->{ParseOptions}->{Handler}->end_element($el);
       $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
   
-  $self->{'_row'} = [];  ### Clear $row and start the new row processing
+  $self->{_row} = [];  ### Clear $row and start the new row processing
   
 }
 
@@ -238,9 +220,9 @@ sub _print_xml_finish
 {
   my $self = shift;
   
-  while (@{$self->{'_row'}} < 9)
+  while (@{$self->{_row}} < 9)
   {
-    push(@{$self->{'_row'}}, undef);
+    push(@{$self->{_row}}, undef);
   }
   
   my $el = {
@@ -261,7 +243,7 @@ sub _print_xml_finish
                   {Data => $self->{ParseOptions}->{IndentChar} x 2} 
           );
           $self->{ParseOptions}->{Handler}->start_element($column);
-          $self->{ParseOptions}->{Handler}->characters({Data => $self->{'_row'}->[$i]});
+          $self->{ParseOptions}->{Handler}->characters({Data => $self->{_row}->[$i]});
           $self->{ParseOptions}->{Handler}->end_element($column);
           $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
       }
@@ -275,6 +257,11 @@ sub _print_xml_finish
  
 }
 
+sub _create_node {
+    shift;
+    # this may check for a factory later
+    return {@_};
+}
 
 1;
 __END__
@@ -305,18 +292,18 @@ __END__
   parse() and it will remain local to that function call 
   and not effect the rest of the object.
 
-=head1 XML::SAXDriver::CSV properties
+=head1 XML::SAXDriver::Excel properties
 
   Source - (Reference to a String, ByteStream, SystemId)
   
-    String - Contains literal CSV data. 
-             Ex (Source => {String => $foo})
+    String - **currently not supported** Contains literal Excel data. 
+             Ex (Source => {String => $foo})  
       
-    ByteStream - Contains a filehandle reference.  
+    ByteStream - **currently not supported** Contains a filehandle reference.  
                  Ex. (Source => {ByteStream => \*STDIN})
       
     SystemId - Contains the path to the file containing 
-               the CSV data. Ex (Source => {SystemId => '../csv/foo.csv'})
+               the Excel  data. Ex (Source => {SystemId => '../excel/foo.xls'})
       
   
   Handler - Contains the object to be used as a XML print handler
@@ -340,7 +327,7 @@ __END__
   Dynamic_Col_Headings - Should be set if you want the XML tag names generated dynamically
                          from the first row in Excel file.  **Make sure that the number of columns
                          in your first row is equal to the largest row in the document.  You
-                         don't generally have to worry about if you are submitting valid CSV
+                         don't generally have to worry about if you are submitting valid Excel
                          data, where each row will have the same number of columns, even if
                          they are empty.
                            
