@@ -5,3 +5,5 @@ MANIFEST
 README
 Data1.xls
 t/00basic.t
+samples/cust_handler.pl
+samples/Test.xls

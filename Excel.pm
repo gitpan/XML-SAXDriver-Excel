@@ -3,7 +3,7 @@ package XML::SAXDriver::Excel;
 use strict;
 use vars qw($VERSION);
 
-$VERSION = '0.01';
+$VERSION = '0.03';
 
 use Spreadsheet::ParseExcel;
 
@@ -62,6 +62,8 @@ sub parse {
   $parse_options->{IndentChar} = "\t" unless defined($parse_options->{IndentChar});
       
   $parse_options->{Parser} ||= Spreadsheet::ParseExcel->new(CellHandler => \&cb_routine, Object => $self, NotSetCell => 1);
+  
+  $parse_options->{Headings_Handler} ||= \&normalize_heading;
   
   my ($ioref, @strings);
   if (defined($parse_options->{Source}{SystemId}) 
@@ -160,6 +162,17 @@ if ($iCol < $oWkS->{MaxCol})
         
 }
 
+sub normalize_heading  ### Default if no Headings_Handler is provided
+{ 
+  my $heading= shift;
+  my $sub_char = shift || '_';
+  $heading =~ s/^\s//g;
+  $heading =~ s/\s$//g;
+  $heading =~ s/^([^a-zA-Z|^_|^:])/$sub_char/g;   ### We used to also replace the xml in the beginning, but I took it of per recommendation of Michael Rodriguez.
+  $heading =~ s/[^a-zA-Z|^-|^.|^0-9|^:]/$sub_char/g;
+  return $heading; 
+}
+
 
 sub _print_xml
 {
@@ -182,7 +195,7 @@ sub _print_xml
       }
       elsif (!@{$self->{ParseOptions}->{Col_Headings}} && $self->{ParseOptions}->{Dynamic_Col_Headings})
       {
-              @{$self->{ParseOptions}->{Col_Headings}} = @{$self->{'_row'}};
+              @{$self->{ParseOptions}->{Col_Headings}} = map { $self->{ParseOptions}->{Headings_Handler}->($_, $self->{ParseOptions}->{SubChar}); } @{$self->{'_row'}};
               $self->{'_row'} = [];  ### Clear the @$row array
               return;  ### So that it does not print the column headings as the content of the first node.                
       }
@@ -319,11 +332,24 @@ __END__
   IndentChar - Specifies the indentation character to be used for printing XML data (if any).
                Defaults to '\t' but can be changed.  Ex. (IndentChar => "\t\t")
                
+  SubChar - Specifies the character(s) to use to substitute illegal chars in xml tag names, that
+            will be generated from the first row, but setting the Dynamic_Col_Headings.              
+               
   Col_Headings - Reference to the array of column names to be used for XML tag names.
   
-  Dynamic_Col_Headings - Should be set if you want the XML tag names 
-                         generated dynamically from the row in CSV 
-                         file.
+  Dynamic_Col_Headings - Should be set if you want the XML tag names generated dynamically
+                         from the first row in Excel file.  **Make sure that the number of columns
+                         in your first row is equal to the largest row in the document.  You
+                         don't generally have to worry about if you are submitting valid CSV
+                         data, where each row will have the same number of columns, even if
+                         they are empty.
+                           
+  Headings_Handler - Should be used along with Dynamic_Col_Headings to provide a heading 
+                     normalization handler, to conform the headings to the XML 1.0 
+                     specifications.  If not provided, a default will be used that only
+                     works with ASCII chars, therefore any other character sets need to 
+                     provide a custom handler!  The handler sub will be passed the heading
+                     string as the first argument.
                          
 =head1 AUTHOR
 
