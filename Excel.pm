@@ -6,7 +6,7 @@ use Spreadsheet::ParseExcel;
 
 use base qw(XML::SAX::Base);
 use vars qw($VERSION $NS_SAXDriver_Excel);
-$VERSION = '0.05';
+$VERSION = '0.06';
 $NS_SAXDriver_Excel = 'http://xmlns.perl.org/sax/XML::SAXDriver::Excel';
 
 sub _parse_bytestream
@@ -53,9 +53,6 @@ sub _init {
 	$self->{_last_row_num} = 0;  ## Used to save the last row value received
 	$self->{_last_col} = 0;
 		    
-  $self->{ParseOptions}->{NewLine} = "\n" unless defined($self->{ParseOptions}->{NewLine});
-  $self->{ParseOptions}->{IndentChar} = "\t" unless defined($self->{ParseOptions}->{IndentChar});
-      
   $self->{ParseOptions}->{Parser} ||= Spreadsheet::ParseExcel->new(CellHandler => \&cb_routine, Object => $self, NotSetCell => 1);
   
   $self->{ParseOptions}->{Headings_Handler} ||= \&_normalize_heading;
@@ -69,15 +66,13 @@ sub _init {
                                   );
   $self->start_prefix_mapping($pm_excel);
   $self->end_prefix_mapping($pm_excel);
-  $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
-  
+    
   $self->{_doc_element} = {
               Name => $self->{ParseOptions}->{File_Tag} || "records",
               Attributes => {},
           };
 
-  $self->{ParseOptions}->{Handler}->start_element($self->{_doc_element});
-  $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
+  $self->{ParseOptions}->{Handler}->start_element($self->{_doc_element});  
 }
   
   ## Parse file or string
@@ -188,29 +183,17 @@ sub _print_xml
         Attributes => {},
       };
       
-      $self->{ParseOptions}->{Handler}->characters(
-              {Data => $self->{ParseOptions}->{IndentChar} || "\t"
-              }
-      );
       $self->{ParseOptions}->{Handler}->start_element($el);
-      $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
-
+      
       for (my $i = 0; $i <= $#{$self->{ParseOptions}->{Col_Headings}}; $i++) {
           my $column = { Name => $self->{ParseOptions}->{Col_Headings}->[$i], Attributes => {} };
-          $self->{ParseOptions}->{Handler}->characters(
-                  {Data => $self->{ParseOptions}->{IndentChar} x 2} 
-          );
+          
           $self->{ParseOptions}->{Handler}->start_element($column);
           $self->{ParseOptions}->{Handler}->characters({Data => $self->{_row}->[$i]});
-          $self->{ParseOptions}->{Handler}->end_element($column);
-          $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
+          $self->{ParseOptions}->{Handler}->end_element($column);          
       }
 
-      $self->{ParseOptions}->{Handler}->characters(
-              {Data => $self->{ParseOptions}->{IndentChar}}
-      );
-      $self->{ParseOptions}->{Handler}->end_element($el);
-      $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
+      $self->{ParseOptions}->{Handler}->end_element($el);      
   
   $self->{_row} = [];  ### Clear $row and start the new row processing
   
@@ -230,31 +213,17 @@ sub _print_xml_finish
         Attributes => {},
       };
       
-      $self->{ParseOptions}->{Handler}->characters(
-              {Data => $self->{ParseOptions}->{IndentChar} || "\t"
-              }
-      );
       $self->{ParseOptions}->{Handler}->start_element($el);
-      $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
-
+      
       for (my $i = 0; $i <= $#{$self->{ParseOptions}->{Col_Headings}}; $i++) {
           my $column = { Name => $self->{ParseOptions}->{Col_Headings}->[$i], Attributes => {} };
-          $self->{ParseOptions}->{Handler}->characters(
-                  {Data => $self->{ParseOptions}->{IndentChar} x 2} 
-          );
+          
           $self->{ParseOptions}->{Handler}->start_element($column);
           $self->{ParseOptions}->{Handler}->characters({Data => $self->{_row}->[$i]});
-          $self->{ParseOptions}->{Handler}->end_element($column);
-          $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
+          $self->{ParseOptions}->{Handler}->end_element($column);          
       }
 
-      $self->{ParseOptions}->{Handler}->characters(
-              {Data => $self->{ParseOptions}->{IndentChar}}
-      );
-      $self->{ParseOptions}->{Handler}->end_element($el);
-      $self->{ParseOptions}->{Handler}->characters({Data => $self->{ParseOptions}->{NewLine}});
-  
- 
+      $self->{ParseOptions}->{Handler}->end_element($el); 
 }
 
 sub _create_node {
@@ -271,7 +240,7 @@ __END__
 
 =head1 NAME
 
-  XML::SAXDriver::Exce; - SAXDriver for converting Excel files to XML
+  XML::SAXDriver::Excel - SAXDriver for converting Excel files to XML
 
 =head1 SYNOPSIS
 
@@ -312,13 +281,6 @@ __END__
                ****There is no DTD support available at this time.  
                I'll make it available in the next version.****
   
-  NewLine - Specifies the new line character to be used for printing XML data (if any).
-            Defaults to '\n' but can be changed.  If you don't want to indent use empty 
-            quotes.  Ex. (NewLine => "")
-            
-  IndentChar - Specifies the indentation character to be used for printing XML data (if any).
-               Defaults to '\t' but can be changed.  Ex. (IndentChar => "\t\t")
-               
   SubChar - Specifies the character(s) to use to substitute illegal chars in xml tag names, that
             will be generated from the first row, but setting the Dynamic_Col_Headings.              
                
