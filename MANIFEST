@@ -1,0 +1,7 @@
+Changes
+Excel.pm
+Makefile.PL
+MANIFEST
+README
+Data1.xls
+t/00basic.t
